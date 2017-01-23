@@ -1024,6 +1024,7 @@ extern "C" {
 	  if(devFilter == NULL && (niostate->up == NO
 				   || niostate->vlan != HSP_VLAN_ALL
 				   || niostate->loopback
+				   || niostate->virtual
 				   || niostate->bond_master)) {
 	    continue;
 	  }

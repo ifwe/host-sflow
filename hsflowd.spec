@@ -50,6 +50,9 @@ make clean
 %doc README LICENSE INSTALL.Linux
 /etc/hsflowd/modules/
 
+%post
+if [ -f /usr/bin/systemctl ] ; then /usr/bin/systemctl daemon-reload ; fi
+
 %changelog
 * Mon Dec 12 2016 nhm <neil.mckee@inmon.com>
 - add dbus config file

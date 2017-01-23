@@ -9,13 +9,16 @@ extern "C" {
 #include "hsflowd.h"
 #include "hsflow_ethtool.h"
 
+#include <dirent.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/types.h>
 #include <net/if.h>
 #include <linux/types.h>
 #include <linux/ethtool.h>
 #include <linux/sockios.h>
 #include <linux/if_vlan.h>
+#include <unistd.h>
 
   // limit the number of chars we will read from each line
   // in /proc/net/dev and /prov/net/vlan/config
@@ -572,26 +575,43 @@ extern "C" {
     return 0;
   }
 
-  FILE *procFile = fopen("/proc/net/dev", "r");
-  if(procFile) {
+  DIR *sysDir = opendir("/sys/class/net");
+  if(sysDir) {
     struct ifreq ifr;
     memset(&ifr, 0, sizeof(ifr));
-    char line[MAX_PROC_LINE_CHARS];
-    int lineNo = 0;
-    while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
-      if(lineNo++ < 2) continue; // skip headers
-      // the device name is always the first token before the ":"
-      char buf[MAX_PROC_LINE_CHARS];
-      char *p = line;
-      char *devName = parseNextTok(&p, " \t:", NO, '\0', NO, buf, MAX_PROC_LINE_CHARS);
-      if(devName == NULL) continue;
-      devName = trimWhitespace(devName);
-      int devNameLen = my_strlen(devName);
-      if(devNameLen == 0 || devNameLen >= IFNAMSIZ) continue;
+    struct dirent *entry;
+    while((entry = readdir(sysDir))) {
+      char *devName = entry->d_name;
+      myDebug(2, "/sys/class/net entry: %s", devName);
+      if(strcmp(devName, ".") == 0 || strcmp(devName, "..") == 0 ||
+         my_strlen(devName) >= IFNAMSIZ) {
+        continue;
+      }
       // we set the ifr_name field to make our queries
       strncpy(ifr.ifr_name, devName, sizeof(ifr.ifr_name));
 
       myDebug(3, "reading interface %s", devName);
+
+
+      // Determine if this interface is virtual.
+      char path[MAX_PROC_LINE_CHARS];
+      if(snprintf(path, MAX_PROC_LINE_CHARS, "%s/%s", "/sys/class/net",
+               devName) < 0) {
+        myLog(LOG_ERR, "sprintf error making file path");
+      }
+      else {
+        char target[MAX_PROC_LINE_CHARS];
+        if(readlink(path, target, MAX_PROC_LINE_CHARS) == -1) {
+          myLog(LOG_ERR, "readlink() error on %s : %s", path,
+                strerror(errno));
+        }
+        else {
+          if (strstr(target, "/virtual/")) {
+            myDebug(1, "ignoring virtual interface: %s", devName);
+            continue;
+          }
+        }
+      }
 
       // Get the flags for this interface
       if(ioctl(fd,SIOCGIFFLAGS, &ifr) < 0) {
@@ -726,7 +746,10 @@ extern "C" {
       }
 
     }
-    fclose(procFile);
+    closedir(sysDir);
+  }
+  else {
+    myLog(LOG_ERR, "failed to read /sys/class/net :%s", strerror(errno));
   }
 
   close (fd);

@@ -921,7 +921,11 @@ extern "C" {
 #define CLONE_NEWNET 0x40000000	/* New network namespace (lo, device, names sockets, etc) */
 #endif
 
-#define MY_SETNS(fd, nstype) syscall(__NR_setns, fd, nstype)
+int fake_setns(void) {
+    myLog(LOG_ERR, "setting namespace disabled in this build");
+    return 1;
+}
+#define MY_SETNS(fd, nstype) fake_setns()
 #else
 #define MY_SETNS(fd, nstype) setns(fd, nstype)
 #endif

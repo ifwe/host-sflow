@@ -12,6 +12,7 @@ extern "C" {
 #include <dirent.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <net/if.h>
 #include <linux/types.h>
@@ -654,12 +655,34 @@ extern "C" {
     struct dirent *entry;
     while((entry = readdir(sysDir))) {
       char *devName = entry->d_name;
+      char path[MAX_PROC_LINE_CHARS];
+      char target[MAX_PROC_LINE_CHARS];
       bool virtual = NO;
+      struct stat sb;
+
       myDebug(2, "/sys/class/net entry: %s", devName);
       if(strcmp(devName, ".") == 0 || strcmp(devName, "..") == 0 ||
-         my_strlen(devName) >= IFNAMSIZ) {
+        my_strlen(devName) >= IFNAMSIZ) {
         continue;
       }
+
+      if(snprintf(path, MAX_PROC_LINE_CHARS, "%s/%s", "/sys/class/net",
+               devName) < 0) {
+        myLog(LOG_ERR, "sprintf error making file path");
+        continue;
+      }
+
+      // Some entries (e.g. bonding_masters) are not symlinks; ignore them.
+      if(lstat(path, &sb) == -1) {
+        myLog(LOG_ERR, "lstat() error on %s : %s", path,
+              strerror(errno));
+        continue;
+      }
+      if((sb.st_mode & S_IFMT) != S_IFLNK) {
+        myDebug(2, "ignoring non-symlink %s", devName);
+        continue;
+      }
+
       // we set the ifr_name field to make our queries
       strncpy(ifr.ifr_name, devName, IFNAMSIZ-1);
 
@@ -667,22 +690,14 @@ extern "C" {
 
 
       // Determine if this interface is virtual.
-      char path[MAX_PROC_LINE_CHARS];
-      if(snprintf(path, MAX_PROC_LINE_CHARS, "%s/%s", "/sys/class/net",
-               devName) < 0) {
-        myLog(LOG_ERR, "sprintf error making file path");
+      if(readlink(path, target, MAX_PROC_LINE_CHARS) == -1) {
+        myLog(LOG_ERR, "readlink() error on %s : %s", devName,
+              strerror(errno));
       }
       else {
-        char target[MAX_PROC_LINE_CHARS];
-        if(readlink(path, target, MAX_PROC_LINE_CHARS) == -1) {
-          myLog(LOG_ERR, "readlink() error on %s : %s", path,
-                strerror(errno));
-        }
-        else {
-          if (strstr(target, "/virtual/")) {
-            myDebug(1, "flagging virtual interface: %s", devName);
-            virtual = YES;
-          }
+        if (strstr(target, "/virtual/")) {
+          myDebug(1, "flagging virtual interface: %s", devName);
+          virtual = YES;
         }
       }
 
